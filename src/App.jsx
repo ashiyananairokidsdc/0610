@@ -57,16 +57,30 @@ const needsReorder = (p) => totalStock(p) <= num(p.reorderLine);
 const yen = (v, frac = 0) =>
   "¥" + Number(v || 0).toLocaleString("ja-JP", { maximumFractionDigits: frac });
 
-// 使用期限の状態: expired(切れ) / soon(30日以内) / ok / null(未設定)
-const expiryStatus = (p) => {
-  if (!p.expiry) return null;
-  const d = new Date(p.expiry + "T00:00:00");
+// 1件の日付の状態: expired(切れ) / soon(30日以内) / ok / null(未設定)
+const dateStatus = (s) => {
+  if (!s) return null;
+  const d = new Date(s + "T00:00:00");
   if (isNaN(d.getTime())) return null;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const diff = Math.floor((d - today) / 86400000);
   if (diff < 0) return "expired";
   if (diff <= 30) return "soon";
   return "ok";
+};
+// 商品の期限（最大3件）。旧データ(expiry単体)も読めるよう移行対応
+const getExpiries = (p) => {
+  if (Array.isArray(p.expiries)) return [p.expiries[0] || "", p.expiries[1] || "", p.expiries[2] || ""];
+  if (p.expiry) return [p.expiry, "", ""];
+  return ["", "", ""];
+};
+// 3件のうち最も悪い状態を返す（切れ＞間近＞ok）
+const expiryStatus = (p) => {
+  const ss = getExpiries(p).filter(Boolean).map(dateStatus);
+  if (ss.includes("expired")) return "expired";
+  if (ss.includes("soon")) return "soon";
+  if (ss.length) return "ok";
+  return null;
 };
 const fmtDate = (s) => (s ? s.replace(/-/g, "/") : "");
 
@@ -76,7 +90,7 @@ const blankProduct = (masters) => ({
   name: "",
   categoryId: masters.categories[0]?.id || "",
   code: "",
-  expiry: "",
+  expiries: ["", "", ""],
   reorderLine: 0,
   priceMode: "box",
   boxPrice: 0,
@@ -396,14 +410,14 @@ function ProductCard({ p, catName, supName, locName, onEdit }) {
           <div className="flex flex-wrap gap-1 mt-2">
             {locs.map(([lid, q]) => (
               <span key={lid} className="inline-flex items-center gap-1 text-[11px] bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">
-                <MapPin className="w-3 h-3 text-slate-400" />{locName(lid) || "?"} <span className="font-semibold tabular-nums">{num(q)}</span>
+                {locName(lid) || "?"} <span className="font-semibold tabular-nums">{num(q)}</span>
               </span>
             ))}
           </div>
         )}
-        {p.expiry && (
+        {getExpiries(p).some(Boolean) && (
           <div className={`flex items-center gap-1 text-[11px] mt-2 ${ex === "expired" ? "text-red-600 font-medium" : ex === "soon" ? "text-orange-600 font-medium" : "text-slate-400"}`}>
-            <Calendar className="w-3 h-3" /> 期限 {fmtDate(p.expiry)}
+            <Calendar className="w-3 h-3" /> 期限 {getExpiries(p).filter(Boolean).map(fmtDate).join(" / ")}
           </div>
         )}
         {supName && (
@@ -419,6 +433,7 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
   const [imgBusy, setImgBusy] = useState(false);
   const set = (patch) => onChange({ ...product, ...patch });
   const setStock = (lid, v) => onChange({ ...product, stock: { ...product.stock, [lid]: v } });
+  const setExpiry = (i, v) => { const arr = [...getExpiries(product)]; arr[i] = v; onChange({ ...product, expiries: arr }); };
 
   const handleImage = async (e) => {
     const f = e.target.files?.[0];
@@ -503,9 +518,17 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
             <input type="number" min="0" value={product.reorderLine} onChange={(e) => set({ reorderLine: e.target.value })} className={inputCls} />
           </Field>
 
-          <Field label="使用期限">
-            <input type="date" value={product.expiry || ""} onChange={(e) => set({ expiry: e.target.value })} className={inputCls} />
-          </Field>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1.5">使用期限</label>
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-sm text-slate-500 w-5 shrink-0 text-center">{["①", "②", "③"][i]}</span>
+                  <input type="date" value={getExpiries(product)[i]} onChange={(e) => setExpiry(i, e.target.value)} className={inputCls} />
+                </div>
+              ))}
+            </div>
+          </div>
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
