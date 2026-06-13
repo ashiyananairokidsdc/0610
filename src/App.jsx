@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Search, Settings, X, Trash2, Package, AlertTriangle,
-  MapPin, Truck, Image as ImageIcon, Check, Tag, Boxes, Loader2, ClipboardList,
+  MapPin, Truck, Image as ImageIcon, Check, Tag, Boxes, Loader2, ClipboardList, Calendar,
 } from "lucide-react";
 import {
   collection, doc, onSnapshot, setDoc, deleteDoc,
@@ -57,12 +57,26 @@ const needsReorder = (p) => totalStock(p) <= num(p.reorderLine);
 const yen = (v, frac = 0) =>
   "¥" + Number(v || 0).toLocaleString("ja-JP", { maximumFractionDigits: frac });
 
+// 使用期限の状態: expired(切れ) / soon(30日以内) / ok / null(未設定)
+const expiryStatus = (p) => {
+  if (!p.expiry) return null;
+  const d = new Date(p.expiry + "T00:00:00");
+  if (isNaN(d.getTime())) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.floor((d - today) / 86400000);
+  if (diff < 0) return "expired";
+  if (diff <= 30) return "soon";
+  return "ok";
+};
+const fmtDate = (s) => (s ? s.replace(/-/g, "/") : "");
+
 const blankProduct = (masters) => ({
   id: uid(),
   image: "",
   name: "",
   categoryId: masters.categories[0]?.id || "",
   code: "",
+  expiry: "",
   reorderLine: 0,
   priceMode: "box",
   boxPrice: 0,
@@ -337,6 +351,7 @@ function Chip({ children, active, onClick, alert }) {
 function ProductCard({ p, catName, supName, locName, onEdit }) {
   const low = needsReorder(p);
   const ts = totalStock(p);
+  const ex = expiryStatus(p);
   const locs = Object.entries(p.stock || {}).filter(([, q]) => num(q) > 0);
   return (
     <button onClick={onEdit}
@@ -351,6 +366,11 @@ function ProductCard({ p, catName, supName, locName, onEdit }) {
             {low && (
               <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium shrink-0 inline-flex items-center gap-0.5">
                 <AlertTriangle className="w-3 h-3" /> 要発注
+              </span>
+            )}
+            {(ex === "expired" || ex === "soon") && (
+              <span className={`text-[11px] px-1.5 py-0.5 rounded font-medium shrink-0 inline-flex items-center gap-0.5 ${ex === "expired" ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"}`}>
+                <Calendar className="w-3 h-3" /> {ex === "expired" ? "期限切れ" : "期限間近"}
               </span>
             )}
           </div>
@@ -379,6 +399,11 @@ function ProductCard({ p, catName, supName, locName, onEdit }) {
                 <MapPin className="w-3 h-3 text-slate-400" />{locName(lid) || "?"} <span className="font-semibold tabular-nums">{num(q)}</span>
               </span>
             ))}
+          </div>
+        )}
+        {p.expiry && (
+          <div className={`flex items-center gap-1 text-[11px] mt-2 ${ex === "expired" ? "text-red-600 font-medium" : ex === "soon" ? "text-orange-600 font-medium" : "text-slate-400"}`}>
+            <Calendar className="w-3 h-3" /> 期限 {fmtDate(p.expiry)}
           </div>
         )}
         {supName && (
@@ -476,6 +501,10 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
 
           <Field label="発注ライン（この数量以下になると通知）">
             <input type="number" min="0" value={product.reorderLine} onChange={(e) => set({ reorderLine: e.target.value })} className={inputCls} />
+          </Field>
+
+          <Field label="使用期限">
+            <input type="date" value={product.expiry || ""} onChange={(e) => set({ expiry: e.target.value })} className={inputCls} />
           </Field>
 
           <div>
