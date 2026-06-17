@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
-  Plus, Search, Settings, X, Trash2, Package, AlertTriangle,
+  Plus, Minus, Search, Settings, X, Trash2, Package, AlertTriangle,
   MapPin, Truck, Image as ImageIcon, Check, Tag, Boxes, Loader2, ClipboardList, Calendar,
 } from "lucide-react";
 import {
@@ -102,7 +102,6 @@ const blankProduct = (masters) => ({
   image: "",
   name: "",
   categoryId: masters.categories[0]?.id || "",
-  code: "",
   expiries: ["", "", ""],
   reorderLine: 0,
   reorderUnit: "piece",
@@ -201,7 +200,6 @@ export default function App() {
       if (!q) return true;
       return (
         (p.name || "").toLowerCase().includes(q) ||
-        (p.code || "").toLowerCase().includes(q) ||
         catName(p.categoryId).toLowerCase().includes(q) ||
         supName(p.supplierId).toLowerCase().includes(q)
       );
@@ -405,7 +403,6 @@ function ProductCard({ p, catName, supName, locName, onEdit }) {
             )}
           </div>
           <div className="font-semibold text-slate-800 break-words mt-1">{p.name || "（無名）"}</div>
-          <div className="text-xs text-slate-400 truncate">{p.code || "コード未設定"}</div>
         </div>
       </div>
       <div className="px-3 pb-3 mt-auto">
@@ -489,16 +486,11 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
             <input value={product.name} onChange={(e) => set({ name: e.target.value })} className={inputCls} placeholder="例）ミラー" />
           </Field>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="項目">
-              <select value={product.categoryId} onChange={(e) => set({ categoryId: e.target.value })} className={inputCls}>
-                {masters.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </Field>
-            <Field label="コード">
-              <input value={product.code} onChange={(e) => set({ code: e.target.value })} className={inputCls} placeholder="例）A-001" />
-            </Field>
-          </div>
+          <Field label="項目">
+            <select value={product.categoryId} onChange={(e) => set({ categoryId: e.target.value })} className={inputCls}>
+              {masters.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </Field>
 
           <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-3">
             <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg">
@@ -518,7 +510,7 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
                     <input type="number" min="0" value={product.boxPrice} onChange={(e) => set({ boxPrice: e.target.value })} className={inputCls} />
                   </Field>
                   <Field label="1箱の入数">
-                    <input type="number" min="1" value={product.itemsPerBox} onChange={(e) => set({ itemsPerBox: e.target.value })} className={inputCls} />
+                    <Stepper value={product.itemsPerBox} onChange={(v) => set({ itemsPerBox: v })} min={1} />
                   </Field>
                 </div>
                 <div className="flex items-center justify-between text-sm">
@@ -531,7 +523,7 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
 
           <Field label="発注ライン（この数量以下になると通知）">
             <div className="flex gap-2">
-              <input type="number" min="0" value={product.reorderLine} onChange={(e) => set({ reorderLine: e.target.value })} className={inputCls} />
+              <Stepper value={product.reorderLine} onChange={(v) => set({ reorderLine: v })} className="flex-1" />
               <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg shrink-0">
                 <button onClick={() => set({ reorderUnit: "piece" })}
                   className={`px-3 text-sm rounded-md font-medium ${product.reorderUnit !== "box" ? "bg-white text-teal-700 shadow-sm" : "text-slate-500"}`}>個数</button>
@@ -576,8 +568,7 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
               {masters.locations.map((l) => (
                 <div key={l.id} className="flex items-center gap-2">
                   <span className="flex-1 inline-flex items-center gap-1.5 text-sm text-slate-700"><MapPin className="w-4 h-4 text-slate-400" />{l.name}</span>
-                  <input type="number" min="0" value={product.stock[l.id] ?? ""} onChange={(e) => setStock(l.id, e.target.value)} placeholder="0"
-                    className="w-24 text-right px-2 py-1.5 rounded-lg border border-slate-200 text-sm tabular-nums outline-none focus:ring-2 focus:ring-teal-500" />
+                  <Stepper value={product.stock[l.id] ?? ""} onChange={(v) => setStock(l.id, v)} className="w-32 shrink-0" />
                   <span className="text-xs text-slate-400 w-4">{product.stockUnit === "box" ? "箱" : "個"}</span>
                 </div>
               ))}
@@ -630,6 +621,27 @@ function Field({ label, children }) {
   );
 }
 
+// − 数字 ＋ 形式の数値入力
+function Stepper({ value, onChange, min = 0, step = 1, className = "" }) {
+  const cur = () => { const n = Number(value); return isNaN(n) ? 0 : n; };
+  const bump = (d) => onChange(String(Math.max(min, cur() + d * step)));
+  return (
+    <div className={`flex items-stretch ${className}`}>
+      <button type="button" onClick={() => bump(-1)} aria-label="減らす"
+        className="w-9 shrink-0 rounded-l-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 active:bg-slate-200 flex items-center justify-center select-none">
+        <Minus className="w-4 h-4" strokeWidth={2.5} />
+      </button>
+      <input type="number" inputMode="numeric" value={value} min={min} placeholder="0"
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full min-w-0 text-center border-y border-slate-200 text-sm tabular-nums outline-none focus:ring-2 focus:ring-teal-500 focus:relative focus:z-10 py-1.5" />
+      <button type="button" onClick={() => bump(1)} aria-label="増やす"
+        className="w-9 shrink-0 rounded-r-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 active:bg-slate-200 flex items-center justify-center select-none">
+        <Plus className="w-4 h-4" strokeWidth={2.5} />
+      </button>
+    </div>
+  );
+}
+
 function QuickAdd({ label, onAdd }) {
   const [open, setOpen] = useState(false);
   const [val, setVal] = useState("");
@@ -670,7 +682,7 @@ function OrderList({ products, onClose, supName }) {
 
   const buildText = (k, list) => {
     let t = `【${groupName(k)}】\n`;
-    list.forEach((p) => { t += `・${p.name || "（無名）"}${p.code ? ` (${p.code})` : ""} × ${lineQty(p)}\n`; });
+    list.forEach((p) => { t += `・${p.name || "（無名）"} × ${lineQty(p)}\n`; });
     return t.trim();
   };
 
@@ -711,13 +723,12 @@ function OrderList({ products, onClose, supName }) {
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-medium truncate">{p.name || "（無名）"}</div>
                           <div className="text-[11px] text-slate-400 tabular-nums">
-                            {p.code ? p.code + " ・ " : ""}残 {stockLabel(p)} / 発注ライン {reorderLabel(p)}
+                            残 {stockLabel(p)} / 発注ライン {reorderLabel(p)}
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           <span className="text-[11px] text-slate-400">発注</span>
-                          <input type="number" min="0" value={qty[p.id] ?? ""} onChange={(e) => setQty((q) => ({ ...q, [p.id]: e.target.value }))}
-                            className="w-16 text-right px-2 py-1 rounded-lg border border-slate-200 text-sm tabular-nums outline-none focus:ring-2 focus:ring-teal-500" />
+                          <Stepper value={qty[p.id] ?? ""} onChange={(v) => setQty((q) => ({ ...q, [p.id]: v }))} className="w-28 shrink-0" />
                         </div>
                       </div>
                     ))}
