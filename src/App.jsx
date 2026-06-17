@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Minus, Search, Settings, X, Trash2, Package, AlertTriangle,
-  MapPin, Truck, Image as ImageIcon, Check, Tag, Boxes, Loader2, ClipboardList, Calendar, Camera, ScanLine,
+  MapPin, Truck, Image as ImageIcon, Check, Tag, Boxes, Loader2, ClipboardList, Calendar,
 } from "lucide-react";
 import {
   collection, doc, onSnapshot, setDoc, deleteDoc,
@@ -97,33 +97,6 @@ const expiryStatus = (p) => {
 };
 const fmtDate = (s) => (s ? s.replace(/-/g, "/") : "");
 
-/* ---------- OCR照合（撮影テキスト→商品名） ---------- */
-const normalizeText = (s) =>
-  (s || "").toLowerCase().replace(/[\s\u3000]/g, "").replace(/[^\p{L}\p{N}]/gu, "");
-const bigrams = (s) => { const a = []; for (let i = 0; i < s.length - 1; i++) a.push(s.slice(i, i + 2)); return a; };
-const diceSim = (a, b) => {
-  const A = bigrams(a), B = bigrams(b);
-  if (!A.length || !B.length) return 0;
-  const bag = new Map();
-  B.forEach((g) => bag.set(g, (bag.get(g) || 0) + 1));
-  let inter = 0;
-  A.forEach((g) => { const c = bag.get(g); if (c) { inter++; bag.set(g, c - 1); } });
-  return (2 * inter) / (A.length + B.length);
-};
-const matchScore = (name, ocr) => {
-  const n = normalizeText(name), o = normalizeText(ocr);
-  if (n.length < 2) return 0;
-  let s = diceSim(n, o);
-  if (o.includes(n)) s = Math.max(s, 0.95); // 商品名がそのまま読み取れた場合
-  return s;
-};
-const rankByText = (products, ocr) =>
-  products
-    .map((p) => ({ p, score: matchScore(p.name, ocr) }))
-    .filter((x) => x.score >= 0.18)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
-
 const blankProduct = (masters) => ({
   id: uid(),
   image: "",
@@ -158,7 +131,6 @@ export default function App() {
   const [editing, setEditing] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
-  const [showScan, setShowScan] = useState(false);
 
   /* リアルタイム購読 */
   useEffect(() => {
@@ -270,20 +242,14 @@ export default function App() {
               <Plus className="w-4 h-4" /> <span className="hidden sm:inline">商品を追加</span>
             </button>
           </div>
-          <div className="mt-3 flex gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="商品名・項目・発注先で検索"
-                className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-100 text-sm outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white"
-              />
-            </div>
-            <button onClick={() => setShowScan(true)} title="撮影して検索"
-              className="shrink-0 inline-flex items-center gap-1.5 px-3 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 text-sm font-medium">
-              <Camera className="w-4 h-4" /> 撮影
-            </button>
+          <div className="relative mt-3">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="商品名・項目・発注先で検索"
+              className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-100 text-sm outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white"
+            />
           </div>
         </div>
       </header>
@@ -361,15 +327,6 @@ export default function App() {
       )}
 
       {showOrders && <OrderList products={products} onClose={() => setShowOrders(false)} supName={supName} />}
-
-      {showScan && (
-        <ScanModal
-          products={products}
-          catName={catName}
-          onClose={() => setShowScan(false)}
-          onPick={(p) => { setEditing({ ...p, stock: { ...p.stock } }); setShowScan(false); }}
-        />
-      )}
 
       {showSettings && (
         <SettingsModal masters={masters} products={products} onClose={() => setShowSettings(false)} updateMasters={updateMasters} />
@@ -696,114 +653,6 @@ function QuickAdd({ label, onAdd }) {
         className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-teal-500" />
       <button onClick={submit} className="px-3 rounded-lg bg-teal-600 text-white text-sm">追加</button>
       <button onClick={() => { setOpen(false); setVal(""); }} className="px-2 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
-    </div>
-  );
-}
-
-/* ---------- 撮影して検索（OCR） ---------- */
-function ScanModal({ products, catName, onClose, onPick }) {
-  const fileRef = useRef(null);
-  const [status, setStatus] = useState("idle"); // idle | working | done | error
-  const [phase, setPhase] = useState("");
-  const [progress, setProgress] = useState(0);
-  const [recognized, setRecognized] = useState("");
-  const [candidates, setCandidates] = useState([]);
-
-  const run = async (file) => {
-    if (!file) return;
-    setStatus("working"); setProgress(0); setPhase("準備中…（初回は時間がかかります）"); setRecognized(""); setCandidates([]);
-    try {
-      const Tesseract = (await import("tesseract.js")).default;
-      const { data } = await Tesseract.recognize(file, "jpn+eng", {
-        logger: (m) => {
-          if (m.status === "recognizing text") { setPhase("文字を読み取り中…"); setProgress(Math.round((m.progress || 0) * 100)); }
-          else setPhase("準備中…（初回は時間がかかります）");
-        },
-      });
-      const text = data?.text || "";
-      setRecognized(text.trim());
-      setCandidates(rankByText(products, text));
-      setStatus("done");
-    } catch (e) { console.error(e); setStatus("error"); }
-  };
-
-  const reset = () => { setStatus("idle"); setRecognized(""); setCandidates([]); setProgress(0); if (fileRef.current) fileRef.current.value = ""; };
-
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 shrink-0">
-          <h2 className="font-bold flex items-center gap-2"><ScanLine className="w-4 h-4" /> 撮影して検索</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"><X className="w-5 h-5" /></button>
-        </div>
-
-        <div className="overflow-y-auto px-5 py-4 flex-1">
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={(e) => run(e.target.files?.[0])} className="hidden" />
-
-          {status === "idle" && (
-            <div className="text-center py-8">
-              <div className="w-16 h-16 rounded-full bg-teal-50 text-teal-600 flex items-center justify-center mx-auto mb-4"><Camera className="w-7 h-7" /></div>
-              <p className="text-sm text-slate-500 mb-4 leading-relaxed">商品パッケージの文字がはっきり写るように撮影してください。読み取った文字から、登録商品の候補を表示します。</p>
-              <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg">
-                <Camera className="w-4 h-4" /> 撮影する / 画像を選ぶ
-              </button>
-              <p className="text-[11px] text-slate-400 mt-3">初回は文字認識データの読み込みに少し時間がかかります。</p>
-            </div>
-          )}
-
-          {status === "working" && (
-            <div className="text-center py-10">
-              <Loader2 className="w-7 h-7 animate-spin text-teal-600 mx-auto mb-3" />
-              <p className="text-sm text-slate-600">{phase}</p>
-              {progress > 0 && <p className="text-xs text-slate-400 mt-1 tabular-nums">{progress}%</p>}
-            </div>
-          )}
-
-          {status === "error" && (
-            <div className="text-center py-10">
-              <p className="text-sm text-red-600 mb-3">読み取りに失敗しました。通信状況を確認して、もう一度お試しください。</p>
-              <button onClick={reset} className="text-sm px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">やり直す</button>
-            </div>
-          )}
-
-          {status === "done" && (
-            <div>
-              {candidates.length > 0 ? (
-                <>
-                  <p className="text-xs text-slate-500 mb-2">候補（似ている順）。タップすると編集画面が開きます。</p>
-                  <div className="space-y-2">
-                    {candidates.map(({ p, score }) => (
-                      <button key={p.id} onClick={() => onPick(p)}
-                        className="w-full text-left flex items-center gap-3 p-2.5 rounded-xl border border-slate-200 hover:border-teal-400">
-                        <div className="w-12 h-12 rounded-lg bg-slate-100 shrink-0 overflow-hidden flex items-center justify-center">
-                          {p.image ? <img src={p.image} alt="" className="w-full h-full object-cover" /> : <ImageIcon className="w-5 h-5 text-slate-300" />}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="font-medium text-sm break-words">{p.name || "（無名）"}</div>
-                          <div className="text-[11px] text-slate-400">{catName(p.categoryId)}</div>
-                        </div>
-                        <span className="text-[11px] text-slate-400 tabular-nums shrink-0">一致 {Math.round(score * 100)}%</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-slate-500 text-center py-4">登録商品の中に近いものが見つかりませんでした。</p>
-              )}
-
-              {recognized && (
-                <details className="mt-4">
-                  <summary className="text-xs text-slate-400 cursor-pointer">読み取った文字を表示</summary>
-                  <pre className="mt-2 text-[11px] text-slate-500 bg-slate-50 rounded-lg p-2 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{recognized}</pre>
-                </details>
-              )}
-
-              <button onClick={reset} className="mt-4 w-full text-sm px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">もう一度撮影する</button>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
