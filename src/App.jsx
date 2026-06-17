@@ -53,7 +53,17 @@ const unitPrice = (p) => {
   const ipb = num(p.itemsPerBox) > 0 ? num(p.itemsPerBox) : 1;
   return num(p.boxPrice) / ipb;
 };
-const needsReorder = (p) => totalStock(p) <= num(p.reorderLine);
+// 発注ラインを在庫(個数)と同じ単位に換算。reorderUnit==="box" のときだけ箱→個へ変換
+const reorderUnits = (p) => {
+  const rl = num(p.reorderLine);
+  if (p.reorderUnit === "box") {
+    const ipb = num(p.itemsPerBox) > 0 ? num(p.itemsPerBox) : 1;
+    return rl * ipb;
+  }
+  return rl;
+};
+const reorderLabel = (p) => `${num(p.reorderLine)}${p.reorderUnit === "box" ? "箱" : ""}`;
+const needsReorder = (p) => totalStock(p) <= reorderUnits(p);
 const yen = (v, frac = 0) =>
   "¥" + Number(v || 0).toLocaleString("ja-JP", { maximumFractionDigits: frac });
 
@@ -92,6 +102,7 @@ const blankProduct = (masters) => ({
   code: "",
   expiries: ["", "", ""],
   reorderLine: 0,
+  reorderUnit: "piece",
   priceMode: "box",
   boxPrice: 0,
   itemsPerBox: 1,
@@ -263,7 +274,7 @@ export default function App() {
                 <button key={p.id} onClick={() => setEditing({ ...p, stock: { ...p.stock } })}
                   className="text-xs bg-white border border-amber-200 rounded-full px-3 py-1 hover:bg-amber-100">
                   {p.name || "（無名）"}：残 <span className="font-semibold tabular-nums">{totalStock(p)}</span>
-                  <span className="text-slate-400"> / 発注ライン {num(p.reorderLine)}</span>
+                  <span className="text-slate-400"> / 発注ライン {reorderLabel(p)}</span>
                 </button>
               ))}
             </div>
@@ -388,7 +399,7 @@ function ProductCard({ p, catName, supName, locName, onEdit }) {
               </span>
             )}
           </div>
-          <div className="font-semibold text-slate-800 truncate mt-1">{p.name || "（無名）"}</div>
+          <div className="font-semibold text-slate-800 break-words mt-1">{p.name || "（無名）"}</div>
           <div className="text-xs text-slate-400 truncate">{p.code || "コード未設定"}</div>
         </div>
       </div>
@@ -397,7 +408,7 @@ function ProductCard({ p, catName, supName, locName, onEdit }) {
           <div>
             <div className="text-[11px] text-slate-400">在庫数</div>
             <div className={`text-2xl font-bold tabular-nums leading-none ${low ? "text-amber-600" : "text-slate-800"}`}>
-              {ts}<span className="text-xs font-medium text-slate-400 ml-1">/ 発注 {num(p.reorderLine)}</span>
+              {ts}<span className="text-xs font-medium text-slate-400 ml-1">/ 発注 {reorderLabel(p)}</span>
             </div>
           </div>
           <div className="text-right">
@@ -515,7 +526,20 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
           </div>
 
           <Field label="発注ライン（この数量以下になると通知）">
-            <input type="number" min="0" value={product.reorderLine} onChange={(e) => set({ reorderLine: e.target.value })} className={inputCls} />
+            <div className="flex gap-2">
+              <input type="number" min="0" value={product.reorderLine} onChange={(e) => set({ reorderLine: e.target.value })} className={inputCls} />
+              <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg shrink-0">
+                <button onClick={() => set({ reorderUnit: "piece" })}
+                  className={`px-3 text-sm rounded-md font-medium ${product.reorderUnit !== "box" ? "bg-white text-teal-700 shadow-sm" : "text-slate-500"}`}>個数</button>
+                <button onClick={() => set({ reorderUnit: "box" })}
+                  className={`px-3 text-sm rounded-md font-medium ${product.reorderUnit === "box" ? "bg-white text-teal-700 shadow-sm" : "text-slate-500"}`}>箱数</button>
+              </div>
+            </div>
+            {product.reorderUnit === "box" && (
+              <div className="text-[11px] text-slate-400 mt-1">
+                1箱 {num(product.itemsPerBox) > 0 ? num(product.itemsPerBox) : 1}個 ＝ 在庫 {reorderUnits(product)} 個以下で通知
+              </div>
+            )}
           </Field>
 
           <div>
@@ -614,7 +638,7 @@ function OrderList({ products, onClose, supName }) {
   useEffect(() => {
     setQty((prev) => {
       const next = { ...prev };
-      items.forEach((p) => { if (next[p.id] == null) next[p.id] = Math.max(num(p.reorderLine) - totalStock(p), 1); });
+      items.forEach((p) => { if (next[p.id] == null) next[p.id] = Math.max(reorderUnits(p) - totalStock(p), 1); });
       return next;
     });
   }, [items]);
@@ -671,7 +695,7 @@ function OrderList({ products, onClose, supName }) {
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-medium truncate">{p.name || "（無名）"}</div>
                           <div className="text-[11px] text-slate-400 tabular-nums">
-                            {p.code ? p.code + " ・ " : ""}残 {totalStock(p)} / 発注ライン {num(p.reorderLine)}
+                            {p.code ? p.code + " ・ " : ""}残 {totalStock(p)} / 発注ライン {reorderLabel(p)}
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
