@@ -48,6 +48,9 @@ function compressImage(file, max = 480, quality = 0.65) {
 
 const num = (v) => { const n = Number(v); return isNaN(n) ? 0 : n; };
 const totalStock = (p) => Object.values(p.stock || {}).reduce((a, b) => a + num(b), 0);
+// 在庫を個数に換算（stockUnit==="box" のとき箱→個）。totalStockは入力した単位そのまま
+const stockPieces = (p) => totalStock(p) * (p.stockUnit === "box" ? (num(p.itemsPerBox) > 0 ? num(p.itemsPerBox) : 1) : 1);
+const stockLabel = (p) => `${totalStock(p)}${p.stockUnit === "box" ? "箱" : ""}`;
 const unitPrice = (p) => {
   if (p.priceMode === "unit") return num(p.unitPriceInput);
   const ipb = num(p.itemsPerBox) > 0 ? num(p.itemsPerBox) : 1;
@@ -63,7 +66,7 @@ const reorderUnits = (p) => {
   return rl;
 };
 const reorderLabel = (p) => `${num(p.reorderLine)}${p.reorderUnit === "box" ? "箱" : ""}`;
-const needsReorder = (p) => totalStock(p) <= reorderUnits(p);
+const needsReorder = (p) => stockPieces(p) <= reorderUnits(p);
 const yen = (v, frac = 0) =>
   "¥" + Number(v || 0).toLocaleString("ja-JP", { maximumFractionDigits: frac });
 
@@ -103,6 +106,7 @@ const blankProduct = (masters) => ({
   expiries: ["", "", ""],
   reorderLine: 0,
   reorderUnit: "piece",
+  stockUnit: "piece",
   priceMode: "box",
   boxPrice: 0,
   itemsPerBox: 1,
@@ -209,19 +213,38 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       <header className="sticky top-0 z-20 bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="w-9 h-9 rounded-xl bg-teal-600 flex items-center justify-center text-white">
-              <Boxes className="w-5 h-5" />
-            </div>
-            <div className="leading-tight">
-              <div className="font-bold tracking-tight">在庫管理</div>
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                {syncing ? (<><Loader2 className="w-3 h-3 animate-spin" /> 同期中…</>) : "歯科医院"}
+        <div className="max-w-6xl mx-auto px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0 mr-auto">
+              <div className="w-9 h-9 rounded-xl bg-teal-600 flex items-center justify-center text-white">
+                <Boxes className="w-5 h-5" />
+              </div>
+              <div className="leading-tight">
+                <div className="font-bold tracking-tight">在庫管理</div>
+                <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                  {syncing ? (<><Loader2 className="w-3 h-3 animate-spin" /> 同期中…</>) : "歯科医院"}
+                </div>
               </div>
             </div>
+            <button onClick={() => setShowOrders(true)} title="発注リスト" className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100 shrink-0">
+              <ClipboardList className="w-5 h-5" />
+              {reorderList.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center tabular-nums">
+                  {reorderList.length}
+                </span>
+              )}
+            </button>
+            <button onClick={() => setShowSettings(true)} title="マスタ管理" className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 shrink-0">
+              <Settings className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setEditing(blankProduct(masters))}
+              className="shrink-0 inline-flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-3 sm:px-3.5 py-2 rounded-lg"
+            >
+              <Plus className="w-4 h-4" /> <span className="hidden sm:inline">商品を追加</span>
+            </button>
           </div>
-          <div className="flex-1 relative">
+          <div className="relative mt-3">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               value={query}
@@ -230,23 +253,6 @@ export default function App() {
               className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-100 text-sm outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white"
             />
           </div>
-          <button onClick={() => setShowOrders(true)} title="発注リスト" className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100 shrink-0">
-            <ClipboardList className="w-5 h-5" />
-            {reorderList.length > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center tabular-nums">
-                {reorderList.length}
-              </span>
-            )}
-          </button>
-          <button onClick={() => setShowSettings(true)} title="マスタ管理" className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 shrink-0">
-            <Settings className="w-5 h-5" />
-          </button>
-          <button
-            onClick={() => setEditing(blankProduct(masters))}
-            className="shrink-0 inline-flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-3.5 py-2 rounded-lg"
-          >
-            <Plus className="w-4 h-4" /> 商品を追加
-          </button>
         </div>
       </header>
 
@@ -273,7 +279,7 @@ export default function App() {
               {scopedReorder.map((p) => (
                 <button key={p.id} onClick={() => setEditing({ ...p, stock: { ...p.stock } })}
                   className="text-xs bg-white border border-amber-200 rounded-full px-3 py-1 hover:bg-amber-100">
-                  {p.name || "（無名）"}：残 <span className="font-semibold tabular-nums">{totalStock(p)}</span>
+                  {p.name || "（無名）"}：残 <span className="font-semibold tabular-nums">{stockLabel(p)}</span>
                   <span className="text-slate-400"> / 発注ライン {reorderLabel(p)}</span>
                 </button>
               ))}
@@ -375,7 +381,6 @@ function Chip({ children, active, onClick, alert }) {
 
 function ProductCard({ p, catName, supName, locName, onEdit }) {
   const low = needsReorder(p);
-  const ts = totalStock(p);
   const ex = expiryStatus(p);
   const locs = Object.entries(p.stock || {}).filter(([, q]) => num(q) > 0);
   return (
@@ -408,7 +413,7 @@ function ProductCard({ p, catName, supName, locName, onEdit }) {
           <div>
             <div className="text-[11px] text-slate-400">在庫数</div>
             <div className={`text-2xl font-bold tabular-nums leading-none ${low ? "text-amber-600" : "text-slate-800"}`}>
-              {ts}<span className="text-xs font-medium text-slate-400 ml-1">/ 発注 {reorderLabel(p)}</span>
+              {stockLabel(p)}<span className="text-xs font-medium text-slate-400 ml-1">/ 発注 {reorderLabel(p)}</span>
             </div>
           </div>
           <div className="text-right">
@@ -421,7 +426,7 @@ function ProductCard({ p, catName, supName, locName, onEdit }) {
           <div className="flex flex-wrap gap-1 mt-2">
             {locs.map(([lid, q]) => (
               <span key={lid} className="inline-flex items-center gap-1 text-[11px] bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">
-                {locName(lid) || "?"} <span className="font-semibold tabular-nums">{num(q)}</span>
+                {locName(lid) || "?"} <span className="font-semibold tabular-nums">{num(q)}{p.stockUnit === "box" ? "箱" : ""}</span>
               </span>
             ))}
           </div>
@@ -454,7 +459,6 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
   };
 
   const up = unitPrice(product);
-  const ts = totalStock(product);
 
   return (
     <div className="fixed inset-0 z-30 flex justify-end">
@@ -557,7 +561,15 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-medium text-slate-500">保管場所ごとの在庫数</label>
-              <span className="text-xs text-slate-400">合計 <span className="font-semibold tabular-nums text-slate-600">{ts}</span></span>
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1 bg-slate-100 p-0.5 rounded-md">
+                  <button onClick={() => set({ stockUnit: "piece" })}
+                    className={`px-2 py-0.5 text-xs rounded font-medium ${product.stockUnit !== "box" ? "bg-white text-teal-700 shadow-sm" : "text-slate-500"}`}>個数</button>
+                  <button onClick={() => set({ stockUnit: "box" })}
+                    className={`px-2 py-0.5 text-xs rounded font-medium ${product.stockUnit === "box" ? "bg-white text-teal-700 shadow-sm" : "text-slate-500"}`}>箱数</button>
+                </div>
+                <span className="text-xs text-slate-400">合計 <span className="font-semibold tabular-nums text-slate-600">{stockLabel(product)}</span></span>
+              </div>
             </div>
             <div className="space-y-2">
               {masters.locations.length === 0 && <p className="text-xs text-slate-400">保管場所が未登録です。下から追加してください。</p>}
@@ -566,9 +578,13 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
                   <span className="flex-1 inline-flex items-center gap-1.5 text-sm text-slate-700"><MapPin className="w-4 h-4 text-slate-400" />{l.name}</span>
                   <input type="number" min="0" value={product.stock[l.id] ?? ""} onChange={(e) => setStock(l.id, e.target.value)} placeholder="0"
                     className="w-24 text-right px-2 py-1.5 rounded-lg border border-slate-200 text-sm tabular-nums outline-none focus:ring-2 focus:ring-teal-500" />
+                  <span className="text-xs text-slate-400 w-4">{product.stockUnit === "box" ? "箱" : "個"}</span>
                 </div>
               ))}
             </div>
+            {product.stockUnit === "box" && (
+              <div className="text-[11px] text-slate-400 mt-1">1箱 {num(product.itemsPerBox) > 0 ? num(product.itemsPerBox) : 1}個 ＝ 在庫 {stockPieces(product)} 個</div>
+            )}
             <QuickAdd label="＋ 保管場所を追加" onAdd={(name) => onQuickAddMaster("locations", name)} />
           </div>
 
@@ -638,7 +654,7 @@ function OrderList({ products, onClose, supName }) {
   useEffect(() => {
     setQty((prev) => {
       const next = { ...prev };
-      items.forEach((p) => { if (next[p.id] == null) next[p.id] = Math.max(reorderUnits(p) - totalStock(p), 1); });
+      items.forEach((p) => { if (next[p.id] == null) next[p.id] = Math.max(reorderUnits(p) - stockPieces(p), 1); });
       return next;
     });
   }, [items]);
@@ -695,7 +711,7 @@ function OrderList({ products, onClose, supName }) {
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-medium truncate">{p.name || "（無名）"}</div>
                           <div className="text-[11px] text-slate-400 tabular-nums">
-                            {p.code ? p.code + " ・ " : ""}残 {totalStock(p)} / 発注ライン {reorderLabel(p)}
+                            {p.code ? p.code + " ・ " : ""}残 {stockLabel(p)} / 発注ライン {reorderLabel(p)}
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
