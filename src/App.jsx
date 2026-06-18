@@ -101,6 +101,7 @@ const blankProduct = (masters) => ({
   id: uid(),
   image: "",
   name: "",
+  formalName: "",
   categoryId: masters.categories[0]?.id || "",
   expiries: ["", "", ""],
   reorderLine: 0,
@@ -200,6 +201,7 @@ export default function App() {
       if (!q) return true;
       return (
         (p.name || "").toLowerCase().includes(q) ||
+        (p.formalName || "").toLowerCase().includes(q) ||
         catName(p.categoryId).toLowerCase().includes(q) ||
         supName(p.supplierId).toLowerCase().includes(q)
       );
@@ -247,7 +249,7 @@ export default function App() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="商品名・項目・発注先で検索"
+              placeholder="呼称・正式名称・項目・発注先で検索"
               className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-100 text-sm outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white"
             />
           </div>
@@ -482,8 +484,12 @@ function Editor({ product, masters, onChange, onSave, onDelete, onClose, isNew, 
             </div>
           </div>
 
-          <Field label="商品名">
-            <input value={product.name} onChange={(e) => set({ name: e.target.value })} className={inputCls} placeholder="例）ミラー" />
+          <Field label="正式名称">
+            <input value={product.formalName || ""} onChange={(e) => set({ formalName: e.target.value })} className={inputCls} placeholder="例）ニトリルグローブ パウダーフリー Sサイズ" />
+          </Field>
+
+          <Field label="呼称（一覧に表示されます）">
+            <input value={product.name} onChange={(e) => set({ name: e.target.value })} className={inputCls} placeholder="例）グローブ S" />
           </Field>
 
           <Field label="項目">
